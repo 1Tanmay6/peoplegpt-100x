@@ -1,5 +1,5 @@
 from langchain_community.chat_models import ChatOllama
-from typing import Any, Coroutine, Protocol
+from typing import Any, Coroutine
 from abc import ABC, abstractmethod
 import os
 from dotenv import load_dotenv
@@ -8,7 +8,6 @@ from langchain_openai import ChatOpenAI
 from langchain_groq import ChatGroq
 from typing_extensions import Coroutine
 from langchain_core.messages import AIMessage
-from typing_extensions import TypedDict
 from typing import Literal
 
 load_dotenv()

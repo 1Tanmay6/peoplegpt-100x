@@ -9,3 +9,7 @@ wheels/
 # Virtual environments
 .venv
 .env
+docs/
+*.sql
+cleaner.py
+.vscode

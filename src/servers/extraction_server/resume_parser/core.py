@@ -1,10 +1,10 @@
 import re
 import docx
 import pdfplumber
-from typing import Dict, Literal
-from ..connectors import BaseConnector
+from typing import Dict
+from ...connectors import BaseConnector
 
-from typing import List, TypedDict, Optional
+from typing import List, TypedDict
 
 
 class PersonalInformation(TypedDict):
@@ -96,7 +96,7 @@ class ResumeParser:
         else:
             raise ValueError("Unsupported file format")
 
-        formatted_data = await self.connector.acall(self.connector_obj, text)
+        formatted_data = await self.connector.acall(self.connector_obj, text+"\n\nPlease read all the text very thoroughly and make sure that all the fields are appropiatly filled.")
         return formatted_data
 
     @staticmethod
