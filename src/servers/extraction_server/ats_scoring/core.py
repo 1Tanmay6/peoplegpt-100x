@@ -1,333 +1,518 @@
-import json
-import duckdb
-import pandas as pd
-import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-from typing import List, Dict, Any
+import re
+import difflib
+from datetime import datetime
+from typing import Dict, List, Any
+
+from .blueprints import JobRequirements, ScoringWeights
 
 
-def load_all_resumes_from_duckdb(duckdb_path: str, table_name: str = "resumes") -> List[Dict[str, Any]]:
-    """
-    Connects to the given DuckDB file (or in-memory if duckdb_path=":memory:")
-    and selects all JSON blobs from the specified table. It returns a list of
-    Python dicts (parsed JSON).
-    """
-    # Connect to DuckDB (if duckdb_path=":memory:", it’s an in‐memory database)
-    con = duckdb.connect(database=duckdb_path, read_only=False)
+class ATSScorer:
+    def __init__(self, job_requirements: JobRequirements, weights: ScoringWeights = None):
+        self.job_requirements = job_requirements
+        self.weights = weights or ScoringWeights()
+        self.threshold_score = 60.0
 
-    # Fetch all rows from the resumes table; assume column "data" holds a JSON string
-    query = f"SELECT raw FROM {table_name};"
-    # returns a pandas DataFrame with one column "data"
-    df = con.execute(query).fetchdf()
-
-    resumes: List[Dict[str, Any]] = []
-    for idx, row in df.iterrows():
-        json_str = row["raw"]
-        try:
-            resume_dict = json.loads(json_str)
-        except Exception as e:
-            # In case some JSON is invalid, skip or handle as needed
-            print(f"Warning: couldn't parse JSON for row {idx}: {e}")
-            continue
-        resumes.append(resume_dict)
-
-    con.close()
-    return resumes
-
-
-def extract_resume_text(resume: Dict[str, Any]) -> str:
-    """
-    Given a parsed resume dictionary, extract and concatenate:
-      - headline/title
-      - profile summary
-      - all skill strings
-      - (optionally) past job titles/sections, etc.
-    Adjust this to match your actual JSON structure.
-    """
-    pieces: List[str] = []
-
-    # 1) Headline / Title (if exists)
-    headline = resume.get("personal_information", {}).get("headline", "")
-    if headline:
-        pieces.append(str(headline).strip())
-
-    # 2) Profile summary
-    summary = resume.get("summary", {}).get("profile", "")
-    if summary:
-        pieces.append(str(summary).strip())
-
-    # 3) Skills (flatten the "skill_values" array)
-    skill_lines = resume.get("skill", {}).get("skill_values", [])
-    for skill_line in skill_lines:
-        # Each skill_line might be like "Languages: Python, SQL"
-        # We just append the entire string (or split on ":" if you want sub‐keywords)
-        pieces.append(str(skill_line).strip())
-
-    # 4) (Optional) Past job titles or experience descriptions (if you have them)
-    #    e.g., if resume has an array "work_experience":[{"title":..., "description":...}, ...]
-    work_history = resume.get("work_experience", [])
-    if isinstance(work_history, list):
-        for job in work_history:
-            title = job.get("job_title", "")
-            desc = job.get("description", "")
-            if title:
-                pieces.append(str(title).strip())
-            if desc:
-                pieces.append(str(desc).strip())
-
-    # 5) (Optional) Education or Projects, etc.
-    #    Add more sections if your JSON contains them, following the same pattern.
-
-    # Finally concatenate everything into one big text blob:
-    text_blob = " ".join([p.lower() for p in pieces if p])
-    return text_blob
-
-
-def compute_experience_score(candidate_years: float, required_years: float) -> float:
-    """
-    Simple rule: 
-      - If candidate_years >= required_years: score = 1.0
-      - If candidate_years is slightly less (say within 1 year): score = 0.7
-      - Otherwise: score = 0.3
-    You can tweak thresholds as needed.
-    """
-    if candidate_years is None:
-        return 0.0  # no info => worst case
-    try:
-        cand = float(candidate_years)
-        req = float(required_years)
-    except:
-        return 0.0
-
-    if cand >= req:
-        return 1.0
-    elif (req - cand) <= 1.0:
-        return 0.7
-    else:
-        return 0.3
-
-
-def compute_title_match_score(resume_headline: str, job_title: str) -> float:
-    """
-    If the resume’s headline (or current title) contains any of the “keywords”
-    from the job title (e.g. ‘data scientist’, ‘ml engineer’), give a boost.
-      - Exact match or partial word match -> 1.0
-      - Otherwise -> 0.5
-    """
-    if not resume_headline:
-        return 0.0
-    r = resume_headline.lower()
-    jt = job_title.lower()
-    # Split job_title into words/phrases
-    keywords = [kw.strip() for kw in jt.split() if len(kw) > 2]
-    for kw in keywords:
-        if kw in r:
-            return 1.0
-    return 0.5
-
-
-def compute_skill_overlap_score(candidate_skills: List[str], job_skills: List[str]) -> float:
-    """
-    Straightforward measure: fraction of job_skills that appear in candidate_skills.
-    Then clamp between 0.0 and 1.0.
-    E.g. if job requires ["python", "pytorch", "aws"] and candidate has ["python","sql","docker"]:
-      overlap = 1/3 = 0.333 -> return that value.
-    If job_skills is empty, just return 0.0.
-    """
-    if not job_skills:
-        return 0.0
-    cand_set = set([s.lower() for s in candidate_skills if s])
-    job_set = set([s.lower() for s in job_skills if s])
-    if len(job_set) == 0:
-        return 0.0
-    intersection = cand_set.intersection(job_set)
-    return len(intersection) / len(job_set)
-
-
-def rank_resumes(
-    job_description: Dict[str, Any],
-    resumes: List[Dict[str, Any]],
-    tfidf_stopwords: str = "english",
-    weights: Dict[str, float] = None
-) -> pd.DataFrame:
-    """
-    Given a single job_description (a dict) and a list of resumes (each a dict),
-    compute a final score per resume by combining:
-      1) TF-IDF cosine similarity between job_text and each resume_text
-      2) Title‐match rule
-      3) Experience rule
-      4) Skill overlap rule
-
-    weights: a dict that specifies how to weigh each sub‐score. For example:
-      {
-        "tfidf": 0.4,
-        "title": 0.2,
-        "experience": 0.2,
-        "skill_overlap": 0.2
-      }
-    If weights is None, we default to equal-ish weights.
-    """
-    if weights is None:
-        weights = {
-            "tfidf": 0.35,
-            "title": 0.25,
-            "experience": 0.15,
-            "skill_overlap": 0.25,
+    def calculate_overall_score(self, resume_data: Dict) -> Dict[str, Any]:
+        """Calculate comprehensive ATS score for a resume"""
+        scores = {
+            'skills_score': self._calculate_skills_score(resume_data),
+            'experience_score': self._calculate_experience_score(resume_data),
+            'education_score': self._calculate_education_score(resume_data),
+            'progression_score': self._calculate_career_progression_score(resume_data),
+            'project_score': self._calculate_project_score(resume_data),
+            'recency_score': self._calculate_recency_score(resume_data),
+            'completeness_score': self._calculate_completeness_score(resume_data)
         }
 
-    # 1) Build the “job_text_blob” from job_description fields
-    job_title = job_description.get("title", "")
-    job_summary = job_description.get("description", "")
-    job_skills_list = []
-    # If job_description["skills"] is a comma‐separated string, split it:
-    raw_skills = job_description.get("skills", "")
-    if isinstance(raw_skills, str):
-        # Example: "Python, PyTorch, HuggingFace"
-        job_skills_list = [s.strip().lower()
-                           for s in raw_skills.split(",") if s.strip()]
-    elif isinstance(raw_skills, list):
-        job_skills_list = [s.strip().lower()
-                           for s in raw_skills if isinstance(s, str)]
-    else:
-        job_skills_list = []
+        overall_score = (
+            scores['skills_score'] * self.weights.skills_match +
+            scores['experience_score'] * self.weights.experience_relevance +
+            scores['education_score'] * self.weights.education_match +
+            scores['progression_score'] * self.weights.career_progression +
+            scores['project_score'] * self.weights.project_relevance +
+            scores['recency_score'] * self.weights.recency +
+            scores['completeness_score'] * self.weights.completeness
+        )
 
-    # Concatenate:
-    job_text_blob = " ".join(
-        [job_title, job_summary, " ".join(job_skills_list)]).lower()
+        return {
+            'overall_score': round(overall_score, 2),
+            'detailed_scores': scores,
+            'pass_threshold': overall_score >= self.threshold_score,
+            'candidate_name': f"{resume_data.get('personal_information', {}).get('first_name', '')} {resume_data.get('personal_information', {}).get('last_name', '')}".strip(),
+        }
 
-    # 2) For each resume, extract a text blob and also gather structured fields
-    resume_texts: List[str] = []
-    # will hold headline, experience_years, skill_list
-    resume_structured: List[Dict[str, Any]] = []
+    def _calculate_skills_score(self, resume_data: Dict) -> float:
+        """Calculate skills matching score (0-100)"""
+        skill_info = resume_data.get('skill', {})
+        if not skill_info:
+            return 0.0
+
+        resume_skills = []
+        skill_values = skill_info.get('skill_values', [])
+
+        for skill_text in skill_values:
+            resume_skills.extend(self._extract_skills_from_text(skill_text))
+
+        resume_skills = [skill.lower().strip() for skill in resume_skills]
+        required_skills = [skill.lower().strip()
+                           for skill in self.job_requirements.required_skills]
+        preferred_skills = [skill.lower().strip()
+                            for skill in self.job_requirements.preferred_skills]
+
+        required_matches = self._fuzzy_skill_match(
+            resume_skills, required_skills)
+        preferred_matches = self._fuzzy_skill_match(
+            resume_skills, preferred_skills)
+
+        if not required_skills:
+            required_score = 100
+        else:
+            required_score = (required_matches / len(required_skills)) * 100
+
+        if not preferred_skills:
+            preferred_score = 100
+        else:
+            preferred_score = (preferred_matches / len(preferred_skills)) * 100
+
+        final_score = (required_score * 0.7) + (preferred_score * 0.3)
+        return min(100, final_score)
+
+    def _calculate_experience_score(self, resume_data: Dict) -> float:
+        """Calculate experience relevance score (0-100)"""
+        work_experiences = resume_data.get('work_experience', [])
+        if not work_experiences:
+            return 0.0
+
+        total_score = 0
+        max_score = 0
+
+        for exp in work_experiences:
+            exp_score = 0
+            max_exp_score = 100
+
+            job_title = exp.get('job_title', '').lower()
+            title_relevance = self._calculate_keyword_relevance(
+                job_title, self.job_requirements.job_title_keywords
+            )
+            exp_score += title_relevance * 30
+
+            description = exp.get('description', '').lower()
+            desc_relevance = self._calculate_keyword_relevance(
+                description, self.job_requirements.industry_keywords
+            )
+            exp_score += desc_relevance * 40
+
+            duration = self._calculate_experience_duration(exp)
+
+            duration_score = min(20, duration * 4)
+            exp_score += duration_score
+
+            company_score = 10 if exp.get('company_name') else 5
+            exp_score += company_score
+
+            total_score += exp_score
+            max_score += max_exp_score
+
+        if max_score == 0:
+            return 0
+
+        return min(100, (total_score / max_score) * 100)
+
+    def _calculate_education_score(self, resume_data: Dict) -> float:
+        """Calculate education matching score (0-100)"""
+        educations = resume_data.get('education', [])
+        if not educations:
+            return 30.0
+
+        max_score = 0
+        required_education_lower = self.job_requirements.required_education.lower()
+
+        for edu in educations:
+            score = 0
+            degree = edu.get('degree', '').lower()
+            field = edu.get('field_of_study', '').lower()
+            grade = edu.get('grade', '')
+
+            if 'bachelor' in required_education_lower and 'bachelor' in degree:
+                score += 60
+            elif 'master' in required_education_lower and 'master' in degree:
+                score += 70
+            elif 'phd' in required_education_lower or 'doctorate' in required_education_lower:
+                if 'phd' in degree or 'doctorate' in degree:
+                    score += 80
+            elif degree:
+                score += 40
+
+            field_keywords = ['computer', 'data',
+                              'engineering', 'science', 'technology']
+            for keyword in field_keywords:
+                if keyword in field:
+                    score += 5
+                    break
+            if 'data science' in field or 'computer science' in field:
+                score += 25
+
+            if grade:
+                try:
+                    if '/' in grade:
+                        grade_num = float(grade.split('/')[0])
+                        grade_max = float(grade.split('/')[1])
+                        grade_percentage = (grade_num / grade_max) * 100
+                    else:
+                        grade_percentage = float(grade)
+
+                    if grade_percentage >= 85:
+                        score += 15
+                    elif grade_percentage >= 75:
+                        score += 10
+                    elif grade_percentage >= 65:
+                        score += 5
+                except:
+                    score += 5
+
+            max_score = max(max_score, score)
+
+        return min(100, max_score)
+
+    def _calculate_career_progression_score(self, resume_data: Dict) -> float:
+        """Calculate career progression score (0-100)"""
+        work_experiences = resume_data.get('work_experience', [])
+        if len(work_experiences) < 2:
+            return 50.0
+
+        sorted_exp = sorted(work_experiences,
+                            key=lambda x: self._parse_date(x.get('from_date', '')))
+
+        progression_score = 50
+
+        titles = [exp.get('job_title', '').lower() for exp in sorted_exp]
+        progression_keywords = ['intern', 'junior',
+                                'senior', 'lead', 'manager', 'director']
+
+        title_levels = []
+        for title in titles:
+            level = 0
+            for i, keyword in enumerate(progression_keywords):
+                if keyword in title:
+                    level = i
+                    break
+            title_levels.append(level)
+
+        for i in range(1, len(title_levels)):
+            if title_levels[i] > title_levels[i-1]:
+                progression_score += 15
+            elif title_levels[i] == title_levels[i-1]:
+                progression_score += 5
+
+        companies = [exp.get('company_name', '') for exp in sorted_exp]
+        if len(set(companies)) > 1:
+            progression_score += 10
+
+        return min(100, progression_score)
+
+    def _calculate_project_score(self, resume_data: Dict) -> float:
+        """Calculate project relevance score (0-100)"""
+        projects = resume_data.get('projects', [])
+        if not projects:
+            return 0.0
+
+        total_score = 0
+
+        for project in projects:
+            project_score = 0
+            title = project.get('title', '').lower()
+            description = project.get('description', '').lower()
+
+            title_relevance = self._calculate_keyword_relevance(
+                title, self.job_requirements.industry_keywords +
+                self.job_requirements.required_skills
+            )
+            project_score += title_relevance * 30
+
+            desc_relevance = self._calculate_keyword_relevance(
+                description, self.job_requirements.industry_keywords +
+                self.job_requirements.required_skills
+            )
+            project_score += desc_relevance * 40
+
+            duration = self._calculate_project_duration(project)
+            project_score += min(30, duration * 10)
+
+            total_score += project_score
+
+        avg_score = total_score / len(projects) if projects else 0
+        return min(100, avg_score)
+
+    def _calculate_recency_score(self, resume_data: Dict) -> float:
+        """Calculate recency score based on latest experience (0-100)"""
+        work_experiences = resume_data.get('work_experience', [])
+        if not work_experiences:
+            return 50.0
+
+        latest_end_date = None
+        for exp in work_experiences:
+            end_date = exp.get('to_date', '')
+            if end_date.lower() in ['present', 'current', '']:
+                return 100.0
+
+            parsed_date = self._parse_date(end_date)
+            if parsed_date and (latest_end_date is None or parsed_date > latest_end_date):
+                latest_end_date = parsed_date
+
+        if not latest_end_date:
+            return 50.0
+
+        current_date = datetime.now()
+        months_since = (current_date.year - latest_end_date.year) * \
+            12 + (current_date.month - latest_end_date.month)
+
+        if months_since <= 6:
+            return 100.0
+        elif months_since <= 12:
+            return 80.0
+        elif months_since <= 24:
+            return 60.0
+        elif months_since <= 36:
+            return 40.0
+        else:
+            return 20.0
+
+    def _calculate_completeness_score(self, resume_data: Dict) -> float:
+        """Calculate resume completeness score (0-100)"""
+        score = 0
+        max_score = 100
+
+        personal_info = resume_data.get('personal_information', {})
+        if personal_info.get('first_name') and personal_info.get('last_name'):
+            score += 5
+        if personal_info.get('email_address'):
+            score += 5
+        if personal_info.get('phone_number'):
+            score += 5
+        if personal_info.get('linkedin_url') or personal_info.get('website_url') or personal_info.get('github_url'):
+            score += 5
+
+        if resume_data.get('work_experience'):
+            score += 30
+
+        if resume_data.get('education'):
+            score += 20
+
+        if resume_data.get('skill', {}).get('skill_values'):
+            score += 20
+
+        if resume_data.get('projects'):
+            score += 10
+
+        return score
+
+    def _extract_skills_from_text(self, text: str) -> List[str]:
+        """Extract individual skills from skill text"""
+
+        skills = re.split(r'[,;|:]', text)
+
+        cleaned_skills = []
+        for skill in skills:
+            skill = skill.strip()
+
+            skill = re.sub(r'^[^:]*:\s*', '', skill)
+            if skill and len(skill) > 1:
+                cleaned_skills.append(skill)
+
+        return cleaned_skills
+
+    def _fuzzy_skill_match(self, resume_skills: List[str], required_skills: List[str]) -> int:
+        """Count fuzzy matches between resume and required skills"""
+        matches = 0
+
+        for req_skill in required_skills:
+            for resume_skill in resume_skills:
+
+                if req_skill in resume_skill or resume_skill in req_skill:
+                    matches += 1
+                    break
+
+                elif difflib.SequenceMatcher(None, req_skill, resume_skill).ratio() > 0.8:
+                    matches += 1
+                    break
+
+        return matches
+
+    def _calculate_keyword_relevance(self, text: str, keywords: List[str]) -> float:
+        """Calculate keyword relevance score (0-1)"""
+        if not keywords:
+            return 1.0
+
+        text_lower = text.lower()
+        matches = sum(
+            1 for keyword in keywords if keyword.lower() in text_lower)
+        return matches / len(keywords)
+
+    def _calculate_experience_duration(self, experience: Dict) -> float:
+        """Calculate experience duration in years"""
+        from_date = self._parse_date(experience.get('from_date', ''))
+        to_date_str = experience.get('to_date', '')
+
+        if to_date_str.lower() in ['present', 'current', '']:
+            to_date = datetime.now()
+        else:
+            to_date = self._parse_date(to_date_str)
+
+        if not from_date or not to_date:
+            return 0.0
+
+        duration = to_date - from_date
+        return duration.days / 365.25
+
+    def _calculate_project_duration(self, project: Dict) -> float:
+        """Calculate project duration in years"""
+        return self._calculate_experience_duration(project)
+
+    def _parse_date(self, date_str: str) -> datetime:
+        """Parse date string to datetime object"""
+        if not date_str:
+            return None
+
+        date_str = date_str.strip()
+
+        formats = [
+            '%b %Y',
+            '%B %Y',
+            '%m/%Y',
+            '%Y-%m',
+            '%Y',
+            '%m %Y'
+        ]
+
+        for fmt in formats:
+            try:
+                return datetime.strptime(date_str, fmt)
+            except ValueError:
+                continue
+
+        return None
+
+
+def score_multiple_resumes(resumes: List[Dict], job_requirements: JobRequirements) -> List[Dict]:
+    """Score multiple resumes and rank them"""
+    scorer = ATSScorer(job_requirements)
+    results = []
+
     for resume in resumes:
-        # a) Text for TF-IDF:
-        txt = extract_resume_text(resume)
-        resume_texts.append(txt)
+        score_result = scorer.calculate_overall_score(resume)
+        results.append(score_result)
 
-        # b) Structured fields:
-        headline = resume.get("personal_information", {}).get("headline", "")
+    results.sort(key=lambda x: x['overall_score'], reverse=True)
 
-        exp_years = resume.get("experience_years", None)
-        # If your JSON instead has nested years per job, you might sum them manually;
-        # here we assume a flat number field.
+    for i, result in enumerate(results, 1):
+        result['rank'] = i
 
-        # Build a flat list of individual skill keywords:
-        skill_lines = resume.get("skill", {}).get("skill_values", [])
-        flat_skill_list: List[str] = []
-        for line in skill_lines:
-            # e.g. "Languages: Python, SQL" -> ["python","sql"]
-            if ":" in line:
-                parts = line.split(":", 1)
-                subs = [s.strip().lower()
-                        for s in parts[1].split(",") if s.strip()]
-                flat_skill_list.extend(subs)
-            else:
-                flat_skill_list.append(line.strip().lower())
+    passed_candidates = [r for r in results if r['pass_threshold']]
+    failed_candidates = [r for r in results if not r['pass_threshold']]
 
-        resume_structured.append({
-            "headline": str(headline),
-            "exp_years": exp_years,
-            "skill_list": flat_skill_list
-        })
-
-    # 3) Compute TF-IDF similarity between job_text_blob and each resume_text
-    vectorizer = TfidfVectorizer(stop_words=tfidf_stopwords)
-    # first element is job, then resumes
-    corpus = [job_text_blob] + resume_texts
-    tfidf_matrix = vectorizer.fit_transform(corpus)
-
-    # cosine similarity of job (row 0) against each resume (rows 1..N)
-    cosine_similarities = cosine_similarity(
-        tfidf_matrix[0:1], tfidf_matrix[1:]).flatten()
-
-    # 4) For each resume, compute the sub-scores (title, experience, skill overlap)
-    scores: List[Dict[str, Any]] = []
-    req_exp = job_description.get("experience_required", 0)
-    for idx, resume in enumerate(resumes):
-        # TF-IDF score:
-        tfidf_score = float(cosine_similarities[idx])
-
-        # Title match score:
-        title_score = compute_title_match_score(
-            resume_structured[idx]["headline"], job_title
-        )
-
-        # Experience score:
-        exp_score = compute_experience_score(
-            resume_structured[idx]["exp_years"], req_exp
-        )
-
-        # Skill overlap score:
-        skill_score = compute_skill_overlap_score(
-            resume_structured[idx]["skill_list"], job_skills_list
-        )
-
-        # Combine according to weights
-        final_score = (
-            weights["tfidf"] * tfidf_score
-            + weights["title"] * title_score
-            + weights["experience"] * exp_score
-            + weights["skill_overlap"] * skill_score
-        )
-
-        # Truncate or round fields as desired
-        scores.append({
-            "resume_index": idx,
-            "candidate_name": resume.get("personal_information", {}).get("name", "Unknown"),
-            "headline": resume_structured[idx]["headline"],
-            "experience_years": resume_structured[idx]["exp_years"],
-            "skill_overlap_frac": round(skill_score, 4),
-            "tfidf_score": round(tfidf_score, 4),
-            "title_score": round(title_score, 4),
-            "experience_score": round(exp_score, 4),
-            "final_score": round(final_score, 4),
-        })
-
-    # 5) Create DataFrame, sort by final_score descending
-    df = pd.DataFrame(scores)
-    df_sorted = df.sort_values(
-        by="final_score", ascending=False).reset_index(drop=True)
-    return df_sorted
+    return {
+        'passed_candidates': passed_candidates,
+        'failed_candidates': failed_candidates,
+        'total_candidates': len(results),
+        'pass_rate': len(passed_candidates) / len(results) * 100 if results else 0
+    }
 
 
-# =========================
-# Example usage of the above functions:
-# =========================
 if __name__ == "__main__":
-    # 1) Define your DuckDB path (or ":memory:" if you want an in‐memory DB).
-    duckdb_path = "/home/user/my_candidates.duckdb"  # adjust as needed
 
-    # 2) Load all resumes from DuckDB:
-    all_resumes = load_all_resumes_from_duckdb(
-        duckdb_path, table_name="resumes")
+    example_job_requirements = JobRequirements(
+        required_skills=['Python', 'Machine Learning',
+                         'SQL', 'Statistics', 'Data Analysis'],
+        preferred_skills=['TensorFlow',
+                          'Deep Learning', 'AWS', 'Docker', 'MLOps'],
+        min_experience_years=60,
+        required_education='Master\'s Degree',
+        industry_keywords=['HTML'],
+        job_title_keywords=['data scientist',
+                            'machine learning', 'analyst', 'AI engineer']
+    )
 
-    # 3) Define a single job description you want to match against:
-    job_desc = {
-        "title": "Data Scientist – NLP and Deep Learning",
-        "description": (
-            "We are looking for a data scientist with strong NLP experience, "
-            "familiarity with Transformers, PyTorch, and deploying models on AWS. "
-            "You will work on large text‐corpus modeling and productionizing pipelines."
-        ),
-        "skills": "Python, PyTorch, HuggingFace, AWS, NLP, Transformers",
-        "experience_required": 2.0  # in years
+    sample_resume = {
+        "personal_information": {
+            "first_name": "Tanmay",
+            "last_name": "Patil",
+            "phone_number": "+91 8080380670",
+            "email_address": "tanmayp162004@gmail.com",
+            "linkedin_url": "meet-tanmay-patil.vercel.app",
+            "website_url": "meet-tanmay-patil.vercel.app",
+            "headline": "Aspiring Data Scientist with 10 months of hands-on internship experience in forecasting, generative AI, and predictive modeling.",
+            "github_url": "Multi-Generator SRGAN Github, Event Recommendation System Github, Tabular Agentic Workflow Github"
+        },
+        "skill": {
+            "category": "Technical Skills",
+            "skill_values": [
+                "Programming Languages & Tools: Python, R, SQL, TensorFlow, Keras, PyTorch, Scikit-learn, OpenCV, LangChain, Langgraph",
+                "Machine Learning & AI: Deep Learning, Neural Networks, GANs, LLMs, Reinforcement Learning, Model Fine-Tuning",
+                "Data Science & Analytics: Data Wrangling, Feature Engineering, Predictive Modeling, Statistical Analysis, A/B Testing, Data Visualization (Tableau, Power BI)",
+                "Generative AI & NLP: Transformer Models, Text Generation, Sentiment Analysis, Speech-to-Text, Embeddings",
+                "Big Data & Cloud: Spark, AWS, GCP, MLOps, Model Deployment, Docker, Kubernetes"
+            ]
+        },
+        "work_experience": [
+            {
+                "company_name": "Genpact",
+                "job_title": "Data Scientist Intern",
+                "city": "Bangalore, KA",
+                "country": "India",
+                "from_date": "Jan 2025",
+                "to_date": "Jun 2025",
+                "description": "- Built a HITL pipeline for a $5.6B global insurance client, automating enhancements to the underlying system and reducing manual effort by ~60%.\n- Developed a pipeline to automate BRIO sheet processing, enabling seamless commentary generation and reducing manual effort.\n- Proposed a solution for highly realistic synthetic data generation to enhance data diversity and automate model training while ensuring privacy preservation."
+            },
+            {
+                "company_name": "Vanquisher Software Services",
+                "job_title": "Data Scientist Intern (Remote)",
+                "city": "Remote",
+                "country": "India",
+                "from_date": "Jun 2024",
+                "to_date": "Nov 2024",
+                "description": "- Improved the data retrieval pipeline by upgrading it to handle semi-structured data, leading to a 28% average increase in Precision@k for document retrieval.\n- Performed statistical analysis, data visualization, and time series modeling to extract insights and inform technique development.\n- Optimized processing efficiency by implementing parallelization in a large sequential pipeline, significantly improving speed and performance."
+            }
+        ],
+        "education": [
+            {
+                "institution_name": "NIIT University",
+                "field_of_study": "BTech in Computer Science, Data Science",
+                "degree": "Bachelor's Degree",
+                "grade": "9.5/10.0",
+                "city": "Bangalore, KA",
+                "country": "India",
+                "from_date": "Sep 2021",
+                "to_date": "June 2025",
+                "description": "- Developed a high-performance, multi-generator scaled down SRGAN for efficient super-resolution tasks using deep learning and neural networks.\n- Maintained high perceptual quality compared to the original SRGAN (PSNR: 20.64 dB) through effective feature engineering and data-driven decision making."
+            }
+        ],
+        "projects": [
+            {
+                "title": "Multi-Generator SRGAN",
+                "project_role": "Developer",
+                "city": "Bangalore, KA",
+                "country": "India",
+                "from_date": "Jan 2023",
+                "to_date": "Jun 2025",
+                "description": "- Developed a high-performance, multi-generator scaled down SRGAN for efficient super-resolution tasks using deep learning and neural networks.\n- Maintained high perceptual quality compared to the original SRGAN (PSNR: 20.64 dB) through effective feature engineering and data-driven decision making."
+            },
+
+        ]
     }
 
-    # 4) Define custom weights if you want (optional). Otherwise None.
-    custom_weights = {
-        "tfidf": 0.4,
-        "title": 0.2,
-        "experience": 0.2,
-        "skill_overlap": 0.2
-    }
+    scorer = ATSScorer(example_job_requirements)
+    result = scorer.calculate_overall_score(sample_resume)
 
-    # 5) Rank all resumes:
-    ranked_resumes_df = rank_resumes(
-        job_desc, all_resumes, weights=custom_weights)
+    print("=== ATS SCORING RESULTS ===")
+    print(f"Candidate: {result['candidate_name']}")
+    print(f"Overall Score: {result['overall_score']}/100")
+    print(
+        f"Pass Threshold: {'PASSED' if result['pass_threshold'] else 'FAILED'}")
+    print("\n=== DETAILED SCORES ===")
+    for score_type, score_value in result['detailed_scores'].items():
+        print(f"{score_type.replace('_', ' ').title()}: {score_value:.1f}/100")
 
-    # 6) Show top 10 matches:
-    print(ranked_resumes_df.head(10))
-
-    # 7) Optionally: save to CSV
-    # ranked_resumes_df.to_csv("ranked_resumes_for_job_XYZ.csv", index=False)
+    if result['recommendations']:
+        print("\n=== RECOMMENDATIONS ===")
+        for i, rec in enumerate(result['recommendations'], 1):
+            print(f"{i}. {rec}")
