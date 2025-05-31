@@ -1,6 +1,6 @@
 import re
 import docx
-import pdfplumber
+import fitz
 from typing import Dict
 from ...connectors import BaseConnector
 
@@ -101,9 +101,38 @@ class ResumeParser:
 
     @staticmethod
     def _extract_text_from_pdf(file_path: str) -> str:
-        with pdfplumber.open(file_path) as pdf:
-            text = ''.join([page.extract_text() for page in pdf.pages])
-        return text
+        """
+        Extracts text from each page in “blocks,” and returns one string that
+        shows page and block boundaries. Better for when you want to see
+        headings, paragraphs, etc. instead of a flat blob of text.
+        """
+        doc = fitz.open(file_path)
+        pieces = []
+
+        for page_number in range(len(doc)):
+            page = doc.load_page(page_number)
+            blocks = page.get_text("dict")["blocks"]
+
+            pieces.append(f"[Page {page_number + 1}]\n")
+
+            for bl in blocks:
+                if bl["type"] != 0:
+                    continue
+
+                block_text = ""
+                for line in bl["lines"]:
+                    for span in line["spans"]:
+                        block_text += span["text"]
+                    block_text += "\n"
+
+                block_text = block_text.strip()
+                if block_text:
+                    pieces.append(block_text)
+                    pieces.append("\n")
+
+            pieces.append("\n")
+
+        return "".join(pieces)
 
     @staticmethod
     def _extract_text_from_docx(file_path: str) -> str:
