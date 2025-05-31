@@ -1,0 +1,91 @@
+{
+    "personal_information": {
+        "first_name": "Tanmay",
+        "last_name": "Patil",
+        "phone_number": "+91 8080380670",
+        "email_address": "tanmayp162004@gmail.com",
+        "linkedin_url": "meet-tanmay-patil.vercel.app",
+        "website_url": "",
+        "headline": "Aspiring Data Scientist with 10 months of hands-on internship experience in forecasting, generative AI, and predictive modeling.",
+        "github_url": "[Multi-Generator SRGAN](https://github.com/TanmayPatil6/Multi-Generator-SRGAN), [Event Recommendation System](https://github.com/TanmayPatil6/Event_Recommendation_System), [Tabular Agentic Workflow](https://github.com/TanmayPatil6/tabular-agentic-workflow)"
+    },
+    "skill": {
+        "category": "Technical Skills",
+        "skill_values": [
+            "Programming Languages & Tools: Python, R, SQL, TensorFlow, Keras, PyTorch, Scikit-learn, OpenCV, LangChain, Langgraph",
+            "Machine Learning & AI: Deep Learning, Neural Networks, GANs, LLMs, Reinforcement Learning, Model Fine-Tuning",
+            "Data Science & Analytics: Data Wrangling, Feature Engineering, Predictive Modeling, Statistical Analysis, A/B Testing, Data Visualization (Tableau, Power BI)",
+            "Generative AI & NLP: Transformer Models, Text Generation, Sentiment Analysis, Speech-to-Text, Embeddings",
+            "Big Data & Cloud: Spark, AWS, GCP, MLOps, Model Deployment, Docker, Kubernetes"
+        ]
+    },
+    "work_experience": [
+        {
+            "company_name": "Genpact",
+            "job_title": "Data Scientist Intern",
+            "city": "Bangalore, KA",
+            "country": "India",
+            "from_date": "Jan 2025",
+            "to_date": "Jun 2025",
+            "description": "BuiltaHITLpipelinefora $5.6B global insurance client, automating enhancementstotheunderlyingsystemand reducing manual e\ue000ort by \u02dc60%. Developed a pipeline to automate BRIO sheet processing, enabling seamless commentary generation and reducing manual e\ue000ort. Proposed a solution for highly realistic synthetic data generation to enhance data diversity and automate model training while ensuring privacy preservation."
+        },
+        {
+            "company_name": "Vanquisher Software Services",
+            "job_title": "Data Scientist Intern",
+            "city": "Remote",
+            "country": "India",
+            "from_date": "Jun 2024",
+            "to_date": "Nov 2024",
+            "description": "Improved the data retrieval pipeline by upgrading it to handle semi-structured data, leading to a 28% average increase in Precision@k for document retrieval. Performed statistical analysis, datavisualization, and timeseries modeling to extract insights and inform technique development. Optimized processing efficiency by implementing parallelization in a large sequential pipeline, significantly improving speed and performance."
+        }
+    ],
+    "education": [
+        {
+            "institution_name": "NIIT University",
+            "field_of_study": "BTech in Computer Science, Data Science",
+            "degree": "",
+            "grade": "GPA: 9.5 (out of 10.0)",
+            "city": "-",
+            "country": "India",
+            "from_date": "Sept 2021",
+            "to_date": "June 2025",
+            "description": "Projects: [Multi-Generator SRGAN](https://github.com/TanmayPatil6/Multi-Generator-SRGAN), [Event Recommendation System](https://github.com/TanmayPatil6/Event_Recommendation_System), [Tabular Agentic Workflow](https://github.com/TanmayPatil6/tabular-agentic-workflow)"
+        }
+    ],
+    "certifications": [],
+    "summary": {
+        "profile": "Passionate about building scalable ML systems and leveraging deep learning to solve real-world problems."
+    },
+    "achievements": {
+        "achievements": "Developed a high-performance, multi-generator scaled down SRGAN for efficient super resolution tasks using deep learning and neural networks. Maintained high perceptual quality compared to the original SRGAN (PSNR: 20.64 dB) through effective feature engineering and data-driven decision making."
+    },
+    "projects": [
+        {
+            "title": "Multi-Generator SRGAN",
+            "project_role": "Developer",
+            "city": "-",
+            "country": "India",
+            "from_date": "",
+            "to_date": "",
+            "description": "Developed a high-performance, multi-generator scaled down SRGAN for efficient super resolution tasks using deep learning and neural networks. Maintained high perceptual quality compared to the original SRGAN (PSNR: 20.64 dB) through effective feature engineering and data-driven decision making."
+        },
+        {
+            "title": "Event Recommendation System",
+            "project_role": "Engineer",
+            "city": "-",
+            "country": "India",
+            "from_date": "",
+            "to_date": "",
+            "description": "Engineered an AI-driven recommendation system leveraging neural networks and machine learning to deliver personalized event suggestions based on user insights. Implemented hybrid collaborative filtering improved upon \u201cHybrid and Ensemble-Based Personalized Recommender System, Solving Data Sparsity Problem\u201d by Akshay Shukla to mitigate data sparsity challenges. Achieved 59% RMSE improvement using an MLP-based hybrid model for event recommendations."
+        },
+        {
+            "title": "Tabular Agentic Workflow",
+            "project_role": "Developer",
+            "city": "-",
+            "country": "India",
+            "from_date": "",
+            "to_date": "",
+            "description": "Developed an AI-driven agent ecosystem that converts tabular data into an SQLite database and autonomously generates SQL queries. Implemented an adaptive query corrections system that refines SQL queries using custom graph design, improving accuracy for complex queries by up to 60%. Built the architecture and codebase, integrating LLMs and retrieval-augmented generation (RAG) for efficient database interactions."
+        }
+    ]
+}
