@@ -41,7 +41,7 @@ def update_failed_with_message(con):
         """, (notif_msg, resume_id))
 
 
-async def server(db_path: str, job_requirements):
+async def generate(db_path: str, job_requirements):
     con = duckdb.connect(db_path)
     connector = OllamaConnector(thinking='thinking')
 
@@ -65,3 +65,53 @@ async def server(db_path: str, job_requirements):
     update_failed_with_message(con=con)
 
     await update_passed_with_qa_and_message(con=con, generator=generator, job_requirements=job_requirements)
+
+
+def rerank_resumes(db_path: str):
+    con = duckdb.connect(database=db_path)
+
+    # Create passed_ranked_resumes table
+    con.execute("""
+        CREATE OR REPLACE TABLE passed_ranked_resumes AS
+        SELECT 
+            *, 
+            (ats_score + smart_score) AS total_score
+        FROM resumes
+        WHERE ats_passed = TRUE AND smart_passed = TRUE
+        ORDER BY total_score DESC;
+    """)
+
+    # Create failed_resumes table
+    con.execute("""
+        CREATE OR REPLACE TABLE failed_resumes AS
+        SELECT *
+        FROM resumes
+        WHERE ats_passed = FALSE OR smart_passed = FALSE;
+    """)
+
+    con.close()
+    print("Resumes processed successfully: 'passed_ranked_resumes' and 'failed_resumes' tables created.")
+
+
+if __name__ == "__main__":
+    from ..scoring_server.ats_scoring import JobRequirements
+    example_job_requirements = JobRequirements(
+        required_skills=['Python', 'Machine Learning',
+                         'SQL', 'Statistics', 'Data Analysis'],
+        preferred_skills=['TensorFlow',
+                          'Deep Learning', 'AWS', 'Docker', 'MLOps'],
+        min_experience_years=0,
+        required_education='Bachleor Degree',
+        industry_keywords=['Python', "Data Science", "Data Driven"],
+        job_title_keywords=['data scientist',
+                            'machine learning', 'analyst', 'AI engineer'],
+        extra_information=[]
+    )
+
+    rerank_resumes(
+        db_path="/home/tanmaypatil/Documents/100x/db/resumes_3f496a1c-3e16-11f0-81c1-e1be77211e00.duckdb")
+    import asyncio
+    print(asyncio.run(generate(
+        db_path="/home/tanmaypatil/Documents/100x/db/resumes_3f496a1c-3e16-11f0-81c1-e1be77211e00.duckdb",
+        job_requirements=example_job_requirements
+    )))
