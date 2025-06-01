@@ -13,3 +13,4 @@ docs/
 *.sql
 cleaner.py
 .vscode
+*.xlsx

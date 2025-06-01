@@ -39,6 +39,8 @@ async def l2_score_resumes(db_path: str, job_requirements: JobRequirements):
             SET smart_score = ?, smart_passed = ?
             WHERE id = ?
         """, [result['final_score'], result['is_adequate'], resume_id])
+        print(
+            f"Updated resume ID {resume_id}: Score={result['final_score']}, Passed={result['is_adequate']}")
 
 
 async def score(db_path: str, job_requirements: JobRequirements):
@@ -58,5 +60,19 @@ async def score(db_path: str, job_requirements: JobRequirements):
         db_path=db_path, job_requirements=job_requirements
     )
 
-
-# '/home/tanmaypatil/Documents/100x/db/resumes_3f496a1c-3e16-11f0-81c1-e1be77211e00.duckdb'
+if __name__ == "__main__":
+    import asyncio
+    example_job_requirements = JobRequirements(
+        required_skills=['Python', 'Machine Learning',
+                         'SQL', 'Statistics', 'Data Analysis'],
+        preferred_skills=['TensorFlow',
+                          'Deep Learning', 'AWS', 'Docker', 'MLOps'],
+        min_experience_years=0,
+        required_education='Bachleor Degree',
+        industry_keywords=['Python', "Data Science", "Data Driven"],
+        job_title_keywords=['data scientist',
+                            'machine learning', 'analyst', 'AI engineer'],
+        extra_information=[]
+    )
+    db_path = '/home/tanmaypatil/Documents/100x/db/resumes_3f496a1c-3e16-11f0-81c1-e1be77211e00.duckdb'
+    asyncio.run(score(db_path, example_job_requirements))
