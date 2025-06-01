@@ -1,4 +1,5 @@
 import re
+import json
 import difflib
 from datetime import datetime
 from typing import Dict, List, Any
@@ -214,6 +215,7 @@ class ATSScorer:
         """Calculate project relevance score (0-100)"""
         projects = resume_data.get('projects', [])
         if not projects:
+            print('NOOOOOO')
             return 0.0
 
         total_score = 0
@@ -391,128 +393,3 @@ class ATSScorer:
                 continue
 
         return None
-
-
-def score_multiple_resumes(resumes: List[Dict], job_requirements: JobRequirements) -> List[Dict]:
-    """Score multiple resumes and rank them"""
-    scorer = ATSScorer(job_requirements)
-    results = []
-
-    for resume in resumes:
-        score_result = scorer.calculate_overall_score(resume)
-        results.append(score_result)
-
-    results.sort(key=lambda x: x['overall_score'], reverse=True)
-
-    for i, result in enumerate(results, 1):
-        result['rank'] = i
-
-    passed_candidates = [r for r in results if r['pass_threshold']]
-    failed_candidates = [r for r in results if not r['pass_threshold']]
-
-    return {
-        'passed_candidates': passed_candidates,
-        'failed_candidates': failed_candidates,
-        'total_candidates': len(results),
-        'pass_rate': len(passed_candidates) / len(results) * 100 if results else 0
-    }
-
-
-if __name__ == "__main__":
-
-    example_job_requirements = JobRequirements(
-        required_skills=['Python', 'Machine Learning',
-                         'SQL', 'Statistics', 'Data Analysis'],
-        preferred_skills=['TensorFlow',
-                          'Deep Learning', 'AWS', 'Docker', 'MLOps'],
-        min_experience_years=60,
-        required_education='Master\'s Degree',
-        industry_keywords=['HTML'],
-        job_title_keywords=['data scientist',
-                            'machine learning', 'analyst', 'AI engineer']
-    )
-
-    sample_resume = {
-        "personal_information": {
-            "first_name": "Tanmay",
-            "last_name": "Patil",
-            "phone_number": "+91 8080380670",
-            "email_address": "tanmayp162004@gmail.com",
-            "linkedin_url": "meet-tanmay-patil.vercel.app",
-            "website_url": "meet-tanmay-patil.vercel.app",
-            "headline": "Aspiring Data Scientist with 10 months of hands-on internship experience in forecasting, generative AI, and predictive modeling.",
-            "github_url": "Multi-Generator SRGAN Github, Event Recommendation System Github, Tabular Agentic Workflow Github"
-        },
-        "skill": {
-            "category": "Technical Skills",
-            "skill_values": [
-                "Programming Languages & Tools: Python, R, SQL, TensorFlow, Keras, PyTorch, Scikit-learn, OpenCV, LangChain, Langgraph",
-                "Machine Learning & AI: Deep Learning, Neural Networks, GANs, LLMs, Reinforcement Learning, Model Fine-Tuning",
-                "Data Science & Analytics: Data Wrangling, Feature Engineering, Predictive Modeling, Statistical Analysis, A/B Testing, Data Visualization (Tableau, Power BI)",
-                "Generative AI & NLP: Transformer Models, Text Generation, Sentiment Analysis, Speech-to-Text, Embeddings",
-                "Big Data & Cloud: Spark, AWS, GCP, MLOps, Model Deployment, Docker, Kubernetes"
-            ]
-        },
-        "work_experience": [
-            {
-                "company_name": "Genpact",
-                "job_title": "Data Scientist Intern",
-                "city": "Bangalore, KA",
-                "country": "India",
-                "from_date": "Jan 2025",
-                "to_date": "Jun 2025",
-                "description": "- Built a HITL pipeline for a $5.6B global insurance client, automating enhancements to the underlying system and reducing manual effort by ~60%.\n- Developed a pipeline to automate BRIO sheet processing, enabling seamless commentary generation and reducing manual effort.\n- Proposed a solution for highly realistic synthetic data generation to enhance data diversity and automate model training while ensuring privacy preservation."
-            },
-            {
-                "company_name": "Vanquisher Software Services",
-                "job_title": "Data Scientist Intern (Remote)",
-                "city": "Remote",
-                "country": "India",
-                "from_date": "Jun 2024",
-                "to_date": "Nov 2024",
-                "description": "- Improved the data retrieval pipeline by upgrading it to handle semi-structured data, leading to a 28% average increase in Precision@k for document retrieval.\n- Performed statistical analysis, data visualization, and time series modeling to extract insights and inform technique development.\n- Optimized processing efficiency by implementing parallelization in a large sequential pipeline, significantly improving speed and performance."
-            }
-        ],
-        "education": [
-            {
-                "institution_name": "NIIT University",
-                "field_of_study": "BTech in Computer Science, Data Science",
-                "degree": "Bachelor's Degree",
-                "grade": "9.5/10.0",
-                "city": "Bangalore, KA",
-                "country": "India",
-                "from_date": "Sep 2021",
-                "to_date": "June 2025",
-                "description": "- Developed a high-performance, multi-generator scaled down SRGAN for efficient super-resolution tasks using deep learning and neural networks.\n- Maintained high perceptual quality compared to the original SRGAN (PSNR: 20.64 dB) through effective feature engineering and data-driven decision making."
-            }
-        ],
-        "projects": [
-            {
-                "title": "Multi-Generator SRGAN",
-                "project_role": "Developer",
-                "city": "Bangalore, KA",
-                "country": "India",
-                "from_date": "Jan 2023",
-                "to_date": "Jun 2025",
-                "description": "- Developed a high-performance, multi-generator scaled down SRGAN for efficient super-resolution tasks using deep learning and neural networks.\n- Maintained high perceptual quality compared to the original SRGAN (PSNR: 20.64 dB) through effective feature engineering and data-driven decision making."
-            },
-
-        ]
-    }
-
-    scorer = ATSScorer(example_job_requirements)
-    result = scorer.calculate_overall_score(sample_resume)
-
-    print("=== ATS SCORING RESULTS ===")
-    print(f"Candidate: {result['candidate_name']}")
-    print(f"Overall Score: {result['overall_score']}/100")
-    print(
-        f"Pass Threshold: {'PASSED' if result['pass_threshold'] else 'FAILED'}")
-    print("\n=== DETAILED SCORES ===")
-    for score_type, score_value in result['detailed_scores'].items():
-        print(f"{score_type.replace('_', ' ').title()}: {score_value:.1f}/100")
-
-    if result['recommendations']:
-        print("\n=== RECOMMENDATIONS ===")
-        for i, rec in enumerate(result['recommendations'], 1):
-            print(f"{i}. {rec}")

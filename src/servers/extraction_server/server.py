@@ -5,7 +5,7 @@ from .resume_parser import ResumeParser
 from ..connectors import OllamaConnector
 
 
-def main(
+def parse(
     connector,
     folder_path: str,
     job_id: str
@@ -30,6 +30,8 @@ def main(
     print(f"  • All resumes →   Table `resumes` in {db_path}")
     print(f"  • Duplicates →    Table `duplicate_resumes` in {db_path}")
 
+    return db_path
+
 
 if __name__ == "__main__":
     import uuid
@@ -38,4 +40,5 @@ if __name__ == "__main__":
     DEFAULT_FOLDER_PATH = "/home/tanmaypatil/Downloads/Documents"
     DEFAULT_JOB_ID = uuid.uuid1()
 
-    main(connector=connector, folder_path=DEFAULT_FOLDER_PATH, job_id=DEFAULT_JOB_ID)
+    db_path = parse(connector=connector, folder_path=DEFAULT_FOLDER_PATH,
+                    job_id=DEFAULT_JOB_ID)

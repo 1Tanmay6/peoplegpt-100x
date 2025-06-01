@@ -28,7 +28,8 @@ class ResumeDBManager:
                 email    TEXT,
                 phone    TEXT,
                 job_id   TEXT,
-                raw      JSON
+                raw      JSON,
+                file_path TEXT
             );
         """)
 
@@ -40,13 +41,14 @@ class ResumeDBManager:
         phone: Optional[str],
         job_id: str,
         raw_json_str: str,
+        file_path: str
     ):
         self.con.execute(
             """
-            INSERT INTO resumes (id, name, email, phone, job_id, raw)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO resumes (id, name, email, phone, job_id, raw, file_path)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            [resume_id, name, email, phone, job_id, raw_json_str]
+            [resume_id, name, email, phone, job_id, raw_json_str, file_path]
         )
 
     def identify_and_store_duplicates(self) -> int:
@@ -134,7 +136,8 @@ async def parse_and_insert_file(
                 email=email,
                 phone=phone,
                 job_id=job_id,
-                raw_json_str=raw_json_str
+                raw_json_str=raw_json_str,
+                file_path=file_path
             )
             print(f"[+] Inserted '{file_path}' (resume_id={resume_id})")
         except Exception as e:

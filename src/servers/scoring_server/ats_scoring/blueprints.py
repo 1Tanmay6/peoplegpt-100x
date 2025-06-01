@@ -23,4 +23,5 @@ class JobRequirements:
     required_education: str
     industry_keywords: List[str]
     job_title_keywords: List[str]
+    extra_information: List[str]
     location_preference: str = ""
