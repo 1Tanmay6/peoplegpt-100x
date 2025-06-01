@@ -1,5 +1,8 @@
+import uvicorn
+
+
 def main():
-    print("Hello from 100x!")
+    uvicorn.run("servers.app:app", host="0.0.0.0", port=8000, reload=True)
 
 
 if __name__ == "__main__":
