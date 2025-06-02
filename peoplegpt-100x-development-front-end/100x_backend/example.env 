@@ -1,0 +1,8 @@
+openrouter_api_key=
+openrouter_model_name=qwen/qwen3-8b:free
+ollama_model_name_thinking=qwen3:8b
+ollama_model_name_non_thinking=qwen2.5:7b
+groq_api_key=
+groq_model_name=llama-3.3-70b-versatile
+VITE_POSTHOG_API_KEY=
+VITE_POSTHOG_HOST=
