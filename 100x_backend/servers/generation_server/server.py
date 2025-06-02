@@ -1,8 +1,15 @@
+import os
 import duckdb
 import json
+from dotenv import load_dotenv
 from .outreach_generation import generate_failed_message, generate_passed_message
 from .qa_generation import QAGenerator
 from ..connectors import OllamaConnector, GroqConnector
+
+load_dotenv()
+
+api_key = os.getenv("groq_api_key")
+model = os.getenv("groq_model_name")
 
 
 async def update_passed_with_qa_and_message(con, generator: QAGenerator, job_requirements):
@@ -43,7 +50,7 @@ def update_failed_with_message(con):
 
 async def generate(db_path: str, job_requirements):
     con = duckdb.connect(db_path)
-    connector = OllamaConnector(thinking='thinking')
+    connector = GroqConnector(api_key=api_key, model=model)
 
     con.execute("""
     ALTER TABLE passed_ranked_resumes

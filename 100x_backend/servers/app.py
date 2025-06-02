@@ -14,7 +14,7 @@ import zipfile
 import duckdb
 from dotenv import load_dotenv
 from pathlib import Path
-from servers import OllamaConnector, parse, score, JobRequirements, generate, rerank_resumes
+from servers import GroqConnector, parse, score, JobRequirements, generate, rerank_resumes
 
 load_dotenv()
 
@@ -35,12 +35,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
+api_key = os.getenv("groq_api_key")
+model = os.getenv("groq_model_name")
 # Initialize Ollama connector
-connector = OllamaConnector(
-    model=os.getenv('ollama_model_name_non_thinking'),
-    thinking='non-thinking'
-)
+conn = GroqConnector(api_key=api_key, model=model)
 
 DEFAULT_FOLDER_PATH = "docs/uploads"
 DB_DIR = "db"
@@ -107,11 +105,6 @@ async def process_task(prompt, job_id, zip_file, result_future):
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(job_folder_path)
 
-        conn = OllamaConnector(
-            model=os.getenv('ollama_model_name_non_thinking'),
-            thinking='thinking'
-        )
-
         llm_prompt = f"""
         Given a prompt from the user generate all the fields (make sure you use your knowledge but user's prompt is addressed at higher priority), convert the prompt into a useful and structured Job Requirements.
 
@@ -130,7 +123,7 @@ async def process_task(prompt, job_id, zip_file, result_future):
             extra_information=res["extra_information"]
         )
 
-        db_path = await parse(connector=connector, folder_path=job_folder_path, job_id=job_id)
+        db_path = await parse(connector=conn, folder_path=job_folder_path, job_id=job_id)
         await score(db_path=db_path, job_requirements=job_requirements)
         rerank_resumes(db_path=db_path)
         await generate(db_path=db_path, job_requirements=job_requirements)
