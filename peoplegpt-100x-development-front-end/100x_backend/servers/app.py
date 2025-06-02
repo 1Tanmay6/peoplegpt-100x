@@ -19,14 +19,17 @@ from servers import OllamaConnector, parse, score, JobRequirements, generate, re
 load_dotenv()
 
 # Initialize PostHog
-posthog.api_key = 'your-project-api-key'  # Replace with your PostHog API key
-posthog.host = 'https://app.posthog.com'  # Or your self-hosted PostHog instance URL
+# Replace with your PostHog API key
+posthog.api_key = os.getenv("VITE_POSTHOG_API_KEY")
+# Or your self-hosted PostHog instance URL
+posthog.host = os.getenv("VITE_POSTHOG_HOST")
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Or specify list like ["http://localhost:3000"]
+    # Or specify list like ["http://localhost:3000"]
+    allow_origins=["http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -82,9 +85,10 @@ async def process_task(prompt, job_id, zip_file, result_future):
 
     try:
         job_id = job_id or str(uuid.uuid1())
-        
+
         # Track job start
         posthog.capture(
+            'test-id',
             'backend_job_started',
             {
                 'job_id': job_id,
@@ -145,13 +149,15 @@ async def process_task(prompt, job_id, zip_file, result_future):
 
         # Track successful job completion
         posthog.capture(
+            'test-id',
             'backend_job_completed',
             {
                 'job_id': job_id,
                 'processing_time': f"{mins} min {secs} sec",
                 'resumes_processed': len(res_all),
                 'passed_resumes': len(res_pass),
-                'failed_resumes': len(res_fail)
+                'failed_resumes': len(res_fail),
+                'filename': zip_file.filename
             }
         )
 
@@ -170,6 +176,7 @@ async def process_task(prompt, job_id, zip_file, result_future):
     except Exception as e:
         # Track job errors
         posthog.capture(
+            'test-id',
             'backend_job_error',
             {
                 'job_id': job_id,
@@ -190,6 +197,7 @@ async def upload_and_run(
 ):
     # Track API request
     posthog.capture(
+        'test-id',
         'upload_and_run_request',
         {
             'job_id': job_id or 'new',
@@ -205,8 +213,8 @@ async def upload_and_run(
 @app.get("/get-history")
 async def get_history():
     # Track history request
-    posthog.capture('history_request', {})
-    
+    posthog.capture('test-id', 'history_request', {})
+
     db_path = './db'
 
     res = {}

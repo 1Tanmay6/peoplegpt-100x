@@ -42,7 +42,7 @@ export default function HomePage() {
 
     setLoading(true);
     const formData = new FormData();
-    formData.append("file", zipFile);
+    formData.append("zip_file", zipFile);
     formData.append("prompt", prompt);
     formData.append("job_id", uuidv4());
 
@@ -51,7 +51,7 @@ export default function HomePage() {
         hasPrompt: Boolean(prompt)
       });
 
-      const response = await fetch("http://localhost:8000/upload", {
+      const response = await fetch("http://localhost:8000/upload_and_run", {
         method: "POST",
         body: formData,
       });
