@@ -1,5 +1,3 @@
-**Project Title: 100X Full-Stack Application**
-
 A comprehensive full-stack project split into two main folders:
 
 * **`100x_backend`**: Python-based REST API using Uvicorn (ASGI server).
